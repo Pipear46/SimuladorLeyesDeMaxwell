@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>Simulador Ley de Gauss (Electricidad)</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    :root{
+      --bg:#0f1724;
+      --panel:#0b1220;
+      --accent:#20c997;
+      --muted:#9aa6b2;
+      --card:#0b1220;
+    }
+    body{
+      margin:0;
+      font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+      background:linear-gradient(180deg,#071022 0%, #081428 100%);
+      color:#e6eef6;
+    }
+    .container{
+      display:grid;
+      grid-template-columns:330px 1fr;
+      gap:10px;
+      padding:10px;
+      height:100vh;
+      box-sizing:border-box;
+    }
+    .panel{
+      background:var(--card);
+      border-radius:10px;
+      padding:12px;
+      box-shadow:0 6px 18px rgba(2,6,23,0.6);
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+    }
+    h2{margin:0 0 4px;font-size:18px;}
+    label{font-size:13px;color:var(--muted);display:block;margin:4px 0;}
+    input[type=range]{width:100%;}
+    canvas{
+      width:100%;
+      height:100%;
+      border-radius:8px;
+      display:block;
+    }
+    .row{display:flex;gap:8px;align-items:center;}
+    .btn{
+      padding:6px 10px;
+      border-radius:8px;
+      background:transparent;
+      border:1px solid rgba(255,255,255,0.08);
+      color:#fff;
+      cursor:pointer;
+      font-size:13px;
+    }
+    .small{font-size:12px;color:var(--muted);}
+    .legend span{display:block;font-size:12px;color:var(--muted);}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- PANEL DE CONTROLES -->
+    <div class="panel">
+      <div>
+        <h2>Ley de Gauss (Electricidad)</h2>
+        <div class="small">
+          Visualiza el flujo eléctrico a través de una superficie cerrada que rodea cargas.
+        </div>
+      </div>
+
+      <div>
+        <label><strong>Simulación</strong></label>
+        <div class="row">
+          <button id="play" class="btn">Iniciar</button>
+          <button id="pause" class="btn">Pausar</button>
+          <button id="reset" class="btn">Reset</button>
+        </div>
+      </div>
+
+      <div>
+        <label><strong>Opciones visuales</strong></label>
+        <label><input id="show-vectors" type="checkbox" checked> Mostrar vectores de campo</label>
+        <label><input id="show-stream" type="checkbox" checked> Mostrar líneas de campo (streamlines)</label>
+      </div>
+
+      <div>
+        <label><strong>Velocidad de animación</strong></label>
+        <input id="speed" type="range" min="0" max="2" step="0.01" value="1">
+      </div>
+
+      <div>
+        <label><strong>Parámetros</strong></label>
+        <div class="small">
+          Click izquierdo: crear/mover carga.  
+          SHIFT + click: borrar la carga más cercana.
+        </div>
+        <label>Carga (q): 
+          <input id="param1" type="range" min="-5" max="5" step="0.1" value="2">
+        </label>
+        <label>Radio superficie gaussiana (R):
+          <input id="param2" type="range" min="40" max="200" step="2" value="90">
+        </label>
+      </div>
+
+      <div class="legend">
+        <span>🔴 carga positiva</span>
+        <span>🔵 carga negativa</span>
+        <span>Superficie gaussiana: círculo gris</span>
+      </div>
+
+      <div class="small">
+        Ecuación (forma integral):  
+        ∇⋅E=ρ​/ε0​
+      </div>
+    </div>
+
+    <!-- PANEL DEL CANVAS -->
+    <div class="panel">
+      <canvas id="simCanvas"></canvas>
+    </div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('simCanvas');
+    const ctx     = canvas.getContext('2d');
+    const DPR     = window.devicePixelRatio || 1;
+
+    function resize(){
+      canvas.width  = canvas.clientWidth * DPR;
+      canvas.height = canvas.clientHeight * DPR;
+      ctx.setTransform(DPR,0,0,DPR,0,0);
+    }
+    resize();
+    window.addEventListener('resize', resize);
+
+    // ---- Estado ----
+    const entities = []; // {type:'charge', x,y,q}
+    const particles = [];
+    let isPlaying = true;
+
+    // Controles
+    const playBtn  = document.getElementById('play');
+    const pauseBtn = document.getElementById('pause');
+    const resetBtn = document.getElementById('reset');
+
+    playBtn.onclick  = ()=> isPlaying = true;
+    pauseBtn.onclick = ()=> isPlaying = false;
+    resetBtn.onclick = ()=>{
+      entities.length = 0;
+      particles.length = 0;
+      spawnParticles(120);
+    };
+
+    // Partículas para las líneas de campo
+    function spawnParticles(n=80){
+      for(let i=0;i<n;i++){
+        particles.push({
+          x:Math.random()*canvas.clientWidth,
+          y:Math.random()*canvas.clientHeight,
+          age:Math.random()*200
+        });
+      }
+    }
+    spawnParticles(120);
+
+    // Interacción: crear/borrar/mover cargas
+    let dragging = null;
+
+    canvas.addEventListener('mousedown', e=>{
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+
+      if(e.shiftKey){
+        // borrar carga más cercana
+        let best=-1, bd=999;
+        entities.forEach((en,i)=>{
+          const d = Math.hypot(en.x-x,en.y-y);
+          if(d<bd){bd=d;best=i;}
+        });
+        if(best>=0 && bd<25) entities.splice(best,1);
+        return;
+      }
+
+      // ver si hacemos drag de una carga existente
+      let grabbed = null;
+      entities.forEach(en=>{
+        const d = Math.hypot(en.x-x,en.y-y);
+        if(d<12) grabbed = en;
+      });
+      if(grabbed){
+        dragging = grabbed;
+      }else{
+        // crear carga nueva
+        const q = parseFloat(document.getElementById('param1').value) || 1;
+        const en = {type:'charge',x,y,q};
+        entities.push(en);
+        dragging = en;
+      }
+    });
+
+    canvas.addEventListener('mousemove', e=>{
+      if(!dragging) return;
+      const rect = canvas.getBoundingClientRect();
+      dragging.x = e.clientX - rect.left;
+      dragging.y = e.clientY - rect.top;
+    });
+
+    window.addEventListener('mouseup', ()=> dragging=null);
+
+    // ---- Campo eléctrico ----
+    function E_field_at(x,y){
+      let Ex=0, Ey=0;
+      entities.forEach(en=>{
+        if(en.type!=='charge') return;
+        const dx = x-en.x;
+        const dy = y-en.y;
+        const r2 = dx*dx + dy*dy + 25;
+        const r  = Math.sqrt(r2);
+        const k  = 8000;   // constante escalada
+        const strength = k*en.q/r2;
+        Ex += strength*dx/r;
+        Ey += strength*dy/r;
+      });
+      return {x:Ex,y:Ey};
+    }
+
+    function drawArrow(x,y,dx,dy,scale=1,color='rgba(120,200,255,0.9)'){
+      const len = Math.hypot(dx,dy);
+      if(len<1e-3) return;
+      const ux = dx/len, uy = dy/len;
+      ctx.save();
+      ctx.translate(x,y);
+      ctx.rotate(Math.atan2(uy,ux));
+      ctx.beginPath();
+      ctx.moveTo(0,0);
+      ctx.lineTo(len*scale,0);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = Math.min(2,1+len*0.02);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(len*scale,0);
+      ctx.lineTo(len*scale-6,-4);
+      ctx.lineTo(len*scale-6,4);
+      ctx.closePath();
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.restore();
+    }
+
+    function draw(){
+      const W = canvas.clientWidth;
+      const H = canvas.clientHeight;
+
+      // Fondo
+      ctx.clearRect(0,0,W,H);
+      ctx.fillStyle = '#050814';
+      ctx.fillRect(0,0,W,H);
+
+      // Rejilla
+      ctx.globalAlpha = 0.07;
+      ctx.beginPath();
+      for(let x=0; x<W; x+=40){
+        ctx.moveTo(x,0); ctx.lineTo(x,H);
+      }
+      for(let y=0; y<H; y+=40){
+        ctx.moveTo(0,y); ctx.lineTo(W,y);
+      }
+      ctx.strokeStyle = '#1f2937';
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+
+      const speed = parseFloat(document.getElementById('speed').value) || 1;
+      const t = performance.now()*0.001 * speed;
+
+      // Dibujar cargas
+      entities.forEach(en=>{
+        ctx.beginPath();
+        ctx.arc(en.x,en.y,8,0,Math.PI*2);
+        ctx.fillStyle = en.q>0? 'rgba(255,90,90,0.95)':'rgba(120,170,255,0.95)';
+        ctx.fill();
+        ctx.fillStyle='#fff';
+        ctx.font='11px sans-serif';
+        ctx.fillText((en.q>0?'+':'')+en.q.toFixed(1), en.x+10, en.y-10);
+      });
+
+      const showVectors = document.getElementById('show-vectors').checked;
+      const showStream  = document.getElementById('show-stream').checked;
+
+      // Vectores de campo
+      if(showVectors){
+        const step = 40;
+        for(let gx=20; gx<W; gx+=step){
+          for(let gy=20; gy<H; gy+=step){
+            const e = E_field_at(gx,gy);
+            const ex = e.x*0.04, ey=e.y*0.04;
+            drawArrow(gx,gy,ex,ey,1,'rgba(120,200,255,0.9)');
+          }
+        }
+      }
+
+      // Líneas de campo con partículas
+      if(showStream){
+        particles.forEach(p=>{
+          const vel = E_field_at(p.x,p.y);
+          p.x += vel.x*0.06;
+          p.y += vel.y*0.06;
+          p.age++;
+
+          if(p.x<0||p.x>W||p.y<0||p.y>H||p.age>500){
+            p.x = Math.random()*W;
+            p.y = Math.random()*H;
+            p.age = 0;
+          }
+
+          ctx.beginPath();
+          ctx.moveTo(p.x,p.y);
+          ctx.lineTo(p.x-vel.x*0.5, p.y-vel.y*0.5);
+          ctx.strokeStyle='rgba(255,255,255,0.55)';
+          ctx.lineWidth=1;
+          ctx.stroke();
+        });
+      }
+
+      // -------- Superficie gaussiana y flujo --------
+      if(entities.length>0){
+        const Rslider = parseFloat(document.getElementById('param2').value) || 90;
+        const centerCharge = entities[0]; // tomamos la primera carga
+        const cx = centerCharge.x;
+        const cy = centerCharge.y;
+        const R  = Rslider;
+
+        // círculo gaussiano
+        ctx.beginPath();
+        ctx.arc(cx,cy,R,0,Math.PI*2);
+        ctx.strokeStyle='rgba(255,255,255,0.3)';
+        ctx.lineWidth = 1.7;
+        ctx.stroke();
+
+        // Q encerrada: suma de cargas dentro del círculo
+        let Qenc = 0;
+        entities.forEach(en=>{
+          const d = Math.hypot(en.x-cx,en.y-cy);
+          if(d<=R) Qenc += en.q;
+        });
+
+        // texto
+        ctx.fillStyle='#fff';
+        ctx.font='12px sans-serif';
+        ctx.fillText('Superficie gaussiana (S)', cx-R-4, cy-R-8);
+        ctx.fillText('Q_enc = '+Qenc.toFixed(2)+' (u. arb.)', cx+R+10, cy-4);
+        ctx.fillText('Φ_E ≈ Q_enc / ε₀', cx+R+10, cy+12);
+        ctx.fillText('⇒ Φ_E ∝ '+Qenc.toFixed(2), cx+R+10, cy+28);
+
+        // flechas de flujo atravesando S
+        const Nflux = 16;
+        for(let i=0;i<Nflux;i++){
+          const angle = 2*Math.PI*i/Nflux;
+          const sx = cx + R*Math.cos(angle);
+          const sy = cy + R*Math.sin(angle);
+          const e  = E_field_at(sx,sy);
+          const nx = Math.cos(angle);
+          const ny = Math.sin(angle);
+          const En = e.x*nx + e.y*ny; // componente normal
+          const L  = 22*Math.sign(En || 1);
+          drawArrow(
+            sx,sy,
+            nx*L,ny*L,
+            1,
+            En>=0 ? 'rgba(120,255,160,0.9)' : 'rgba(255,120,120,0.9)'
+          );
+        }
+      }
+
+      // HUD
+      ctx.fillStyle='rgba(255,255,255,0.04)';
+      ctx.fillRect(10,10,320,42);
+      ctx.fillStyle='#fff';
+      ctx.font='12px sans-serif';
+      ctx.fillText('Ley de Gauss (Electricidad)', 18,28);
+      ctx.fillStyle='rgba(255,255,255,0.7)';
+      ctx.font='11px sans-serif';
+      ctx.fillText('Cargas: '+entities.length+'  •  Partículas: '+particles.length, 18,42);
+    }
+
+    function loop(){
+      draw();
+      requestAnimationFrame(loop);
+    }
+    loop();
+  </script>
+</body>
+</html>

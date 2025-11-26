@@ -1,0 +1,547 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Simulador: Ley de Ampère–Maxwell (Circuito RC)</title>
+  <style>
+    :root{--bg:#0f1724;--panel:#0b1220;--accent:#38bdf8;--muted:#94a3b8}
+    body{
+      font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+      background:#020617;
+      color:#e6eef6;
+      margin:0;
+      padding:18px;
+    }
+    h1{font-size:18px;margin:0 0 12px}
+    .container{
+      display:grid;
+      grid-template-columns:420px 1fr;
+      gap:16px;
+    }
+    .card{
+      background:rgba(15,23,42,0.98);
+      border-radius:12px;
+      padding:12px;
+      box-shadow:0 6px 18px rgba(2,6,23,0.7);
+      border:1px solid rgba(148,163,184,0.15);
+    }
+    .controls label{
+      display:block;
+      font-size:13px;
+      color:var(--muted);
+      margin-top:8px;
+    }
+    .controls input[type=range]{width:100%}
+    .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .btn{
+      background:var(--accent);
+      border:none;
+      padding:8px 10px;
+      border-radius:8px;
+      color:#020617;
+      cursor:pointer;
+      font-size:13px;
+      font-weight:600;
+    }
+    .btn:hover{filter:brightness(1.1)}
+    canvas#field{
+      background:#020617;
+      border-radius:8px;
+      display:block;
+    }
+    .small{font-size:13px;color:var(--muted)}
+    .meter{font-size:20px;font-weight:700}
+    .legend{display:flex;gap:12px;margin-top:8px;flex-wrap:wrap}
+    .legend .item{display:flex;gap:6px;align-items:center}
+    .dot{width:14px;height:8px;border-radius:6px}
+    .dot.current{background:rgba(56,189,248,0.9)}
+    .dot.displacement{background:rgba(129,140,248,0.95)}
+    footer{margin-top:12px;color:var(--muted);font-size:12px}
+    pre{margin:4px 0 0;font-size:12px}
+  </style>
+</head>
+<body>
+  <h1>Simulador didáctico: Ley de Ampère–Maxwell (Circuito RC)</h1>
+
+  <div class="container">
+    <!-- PANEL IZQUIERDO -->
+    <div class="card controls">
+      <strong>Parámetros del circuito</strong>
+
+      <label>Fuente (V): <span id="Vval">9.0</span> V</label>
+      <input id="Vbat" type="range" min="1" max="15" step="0.1" value="9">
+
+      <label>Resistencia (Ω): <span id="Rval">1000</span></label>
+      <input id="R" type="range" min="100" max="10000" step="10" value="1000">
+
+      <label>Capacitor (µF): <span id="Cval">1000.0</span> µF</label>
+      <input id="C" type="range" min="100" max="5000" step="10" value="1000">
+
+      <label>Velocidad de simulación: <span id="speedVal">1.0</span>x</label>
+      <input id="speed" type="range" min="0.1" max="5" step="0.1" value="1">
+
+      <div style="margin-top:12px" class="row">
+        <button id="start" class="btn">Iniciar</button>
+        <button id="stop" class="btn" style="background:#f97316;color:#020617">Pausa</button>
+        <button id="reset" class="btn" style="background:#22c55e;color:#020617">Reiniciar</button>
+      </div>
+
+      <div style="margin-top:12px">
+        <div class="small">Multímetro (en paralelo con el capacitor):</div>
+        <div class="meter" id="meter">0.00 V</div>
+      </div>
+
+      <div style="margin-top:12px">
+        <div class="small">Ley de Ampère–Maxwell (forma integral simplificada):</div>
+        <pre>∮ B · dl = μ₀ I_conducción + μ₀ ε₀ dΦ_E/dt</pre>
+        <div class="legend">
+          <div class="item">
+            <span class="dot current"></span>
+            <div class="small">Corriente de conducción (J)</div>
+          </div>
+          <div class="item">
+            <span class="dot displacement"></span>
+            <div class="small">Corriente de desplazamiento (ε₀ ∂E/∂t)</div>
+          </div>
+        </div>
+      </div>
+
+      <footer>
+        <ul style="padding-left:18px;margin:6px 0 0">
+          <li>Presiona <b>Iniciar</b> para cargar el capacitor.</li>
+          <li>Arrastra la <b>brújula</b> (circulito) sobre el cable inferior para ver cómo gira la aguja.</li>
+          <li>Haz <b>doble clic</b> cerca del capacitor para alternar carga/descarga.</li>
+        </ul>
+      </footer>
+    </div>
+
+    <!-- PANEL DERECHO -->
+    <div class="card">
+      <canvas id="field" width="760" height="520"></canvas>
+
+      <div style="margin-top:8px;display:flex;gap:12px;align-items:center;justify-content:space-between">
+        <div class="small">Gráficas (voltaje en el capacitor y corriente total)</div>
+        <div style="display:flex;gap:12px;align-items:center;">
+          <div class="small">Modo: <span id="modeLabel">Carga</span></div>
+          <div class="small">t = <span id="tval">0.00</span> s</div>
+        </div>
+      </div>
+
+      <canvas id="plot" width="760" height="160"
+              style="margin-top:8px;background:#020617;border-radius:8px;border:1px solid rgba(148,163,184,0.2)"></canvas>
+    </div>
+  </div>
+
+  <script>
+    const VbatEl   = document.getElementById('Vbat');
+    const REl      = document.getElementById('R');
+    const CEl      = document.getElementById('C');
+    const speedEl  = document.getElementById('speed');
+    const startBtn = document.getElementById('start');
+    const stopBtn  = document.getElementById('stop');
+    const resetBtn = document.getElementById('reset');
+
+    const meter    = document.getElementById('meter');
+    const fieldCanvas   = document.getElementById('field');
+    const fctx          = fieldCanvas.getContext('2d');
+    const plotCanvas    = document.getElementById('plot');
+    const pctx          = plotCanvas.getContext('2d');
+
+    const Vval     = document.getElementById('Vval');
+    const Rval     = document.getElementById('Rval');
+    const Cval     = document.getElementById('Cval');
+    const speedVal = document.getElementById('speedVal');
+    const tval     = document.getElementById('tval');
+    const modeLabel= document.getElementById('modeLabel');
+
+    function updateDisplays(){
+      Vval.textContent     = Number(VbatEl.value).toFixed(1);
+      Rval.textContent     = Math.round(REl.value);
+      Cval.textContent     = Number(CEl.value).toFixed(1);
+      speedVal.textContent = Number(speedEl.value).toFixed(1);
+    }
+    [VbatEl, REl, CEl, speedEl].forEach(el =>
+      el.addEventListener('input', updateDisplays)
+    );
+    updateDisplays();
+
+    // Estado del sistema RC
+    let running  = false;
+    let t        = 0;
+    const dtBase = 0.01;
+    let Vc       = 0;
+    let charging = true;
+
+    let history = { t: [], V: [], I: [] };
+
+    // brújula normalizada (0–1)
+    let compassPos = { x: 0.5, y: 0.75 }; // empieza sobre el cable
+    let draggingCompass = false;
+
+    // Corriente RC
+    function computeCurrent(){
+      const V = Number(VbatEl.value);
+      const R = Number(REl.value);
+      if (charging){
+        return (V - Vc) / R;
+      } else {
+        return -Vc / R;
+      }
+    }
+
+    function computeDisplacementCurrent(){
+      const C_F = Number(CEl.value) * 1e-6;
+      if (history.t.length < 2) return 0;
+      const n   = history.t.length;
+      const dV  = history.V[n-1] - history.V[n-2];
+      const dtH = history.t[n-1] - history.t[n-2];
+      const dVdt = dtH > 0 ? dV / dtH : 0;
+      return C_F * dVdt;
+    }
+
+    // Paso de simulación
+    function stepSim(){
+      if (!running) return;
+
+      const speed   = Number(speedEl.value);
+      const V       = Number(VbatEl.value);
+      const R       = Number(REl.value);
+      const C_F     = Number(CEl.value) * 1e-6;
+      const substeps = Math.max(1, Math.round(speed * 4));
+
+      for (let s = 0; s < substeps; s++){
+        let dVc;
+        if (charging){
+          dVc = (V - Vc) / (R * C_F);
+        } else {
+          dVc = -Vc / (R * C_F);
+        }
+
+        Vc += dVc * dtBase * speed;
+        if (Vc < 0) Vc = 0;
+        if (Vc > V) Vc = V;
+
+        t += dtBase * speed;
+
+        const I = computeCurrent();
+        history.t.push(t);
+        history.V.push(Vc);
+        history.I.push(I);
+        if (history.t.length > 1200){
+          history.t.shift();
+          history.V.shift();
+          history.I.shift();
+        }
+      }
+    }
+
+    function reset(){
+      running  = false;
+      t        = 0;
+      Vc       = 0;
+      charging = true;
+      history  = { t: [], V: [], I: [] };
+      compassPos = { x: 0.5, y: 0.75 };
+      drawAll();
+    }
+
+    // Controles
+    startBtn.onclick = () => { running = true; charging = true; };
+    stopBtn.onclick  = () => { running = false; };
+    resetBtn.onclick = () => { reset(); };
+
+    // Doble clic cerca del capacitor: alternar carga/descarga
+    fieldCanvas.addEventListener('dblclick', (e)=>{
+      const rect = fieldCanvas.getBoundingClientRect();
+      const x    = (e.clientX - rect.left) * (fieldCanvas.width / rect.width);
+      const y    = (e.clientY - rect.top) * (fieldCanvas.height / rect.height);
+
+      const w = fieldCanvas.width;
+      const h = fieldCanvas.height;
+      const cx = w/2;
+      const cy = h/2;
+      const gap = 160;
+      const capX = cx + gap;
+      const capY = cy;
+
+      const dx = x - capX;
+      const dy = y - capY;
+      const dist = Math.sqrt(dx*dx + dy*dy);
+
+      if (dist < 80){
+        charging = !charging;
+      }
+    });
+
+    // Arrastrar brújula
+    fieldCanvas.addEventListener('mousedown', (e)=>{
+      const rect = fieldCanvas.getBoundingClientRect();
+      const xN   = (e.clientX - rect.left) / rect.width;
+      const yN   = (e.clientY - rect.top) / rect.height;
+      const dx   = xN - compassPos.x;
+      const dy   = yN - compassPos.y;
+      if (Math.sqrt(dx*dx + dy*dy) < 0.08){
+        draggingCompass = true;
+      }
+    });
+
+    window.addEventListener('mousemove', (e)=>{
+      if (!draggingCompass) return;
+      const rect = fieldCanvas.getBoundingClientRect();
+      let xN = (e.clientX - rect.left) / rect.width;
+      let yN = (e.clientY - rect.top)  / rect.height;
+      xN = Math.max(0.05, Math.min(0.95, xN));
+      yN = Math.max(0.35, Math.min(0.95, yN));
+      compassPos.x = xN;
+      compassPos.y = yN;
+      drawAll();
+    });
+
+    window.addEventListener('mouseup', ()=>{ draggingCompass = false; });
+
+    // Brújula
+    function drawCompassIntegrated(x, y, angleRad){
+      const ctx = fctx;
+      ctx.save();
+      ctx.translate(x, y);
+
+      ctx.beginPath();
+      ctx.arc(0,0,22,0,Math.PI*2);
+      ctx.strokeStyle = 'rgba(248,250,252,0.9)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      ctx.font = '10px system-ui';
+      ctx.fillStyle = '#e5e7eb';
+      ctx.textAlign = 'center';
+      ctx.fillText('N', 0, -28);
+
+      ctx.rotate(angleRad);
+
+      ctx.beginPath();
+      ctx.moveTo(-3,0);
+      ctx.lineTo(0,-18);
+      ctx.lineTo(3,0);
+      ctx.closePath();
+      ctx.fillStyle = '#ef4444';
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.moveTo(-3,0);
+      ctx.lineTo(0,18);
+      ctx.lineTo(3,0);
+      ctx.closePath();
+      ctx.fillStyle = '#2563eb';
+      ctx.fill();
+
+      ctx.restore();
+    }
+
+    function drawAll(){
+      const w = fieldCanvas.width;
+      const h = fieldCanvas.height;
+
+      fctx.clearRect(0,0,w,h);
+
+      const cx = w/2;
+      const cy = h/2;
+      const gap = 160;
+      const batX = cx - gap;
+      const batY = cy;
+      const capX = cx + gap;
+      const capY = cy;
+
+      fctx.fillStyle = '#020617';
+      fctx.fillRect(0,0,w,h);
+
+      // cable inferior
+      fctx.strokeStyle='rgba(148,163,184,0.25)';
+      fctx.lineWidth=6;
+      fctx.beginPath();
+      const wy = capY + 60;
+      const wx1 = batX + 30;
+      const wx2 = capX - 30;
+      fctx.moveTo(wx1, wy);
+      fctx.lineTo(wx2, wy);
+      // resto del circuito
+      fctx.lineTo(wx2, capY + 20);
+      fctx.moveTo(wx2, capY - 20);
+      fctx.lineTo(cx, cy - 140);
+      fctx.lineTo(batX + 30, batY - 20);
+      fctx.stroke();
+
+      // batería
+      fctx.fillStyle='#38bdf8';
+      fctx.fillRect(batX-18, batY-36, 36,72);
+      fctx.fillStyle='#020617';
+      fctx.fillRect(batX-10, batY-24, 20,48);
+      fctx.fillStyle='#e5e7eb';
+      fctx.font='14px system-ui';
+      fctx.textAlign='center';
+      fctx.fillText(VbatEl.value+' V', batX, batY+64);
+
+      // resistor
+      fctx.strokeStyle='#e5e7eb';
+      fctx.lineWidth=3;
+      fctx.beginPath();
+      let rx = cx-60, ry = cy-140, step=14;
+      fctx.moveTo(rx,ry);
+      for(let i=0;i<8;i++){
+        fctx.lineTo(rx+step, ry + (i%2 ? 10 : -10));
+        rx += step;
+      }
+      fctx.lineTo(rx+10, ry);
+      fctx.stroke();
+      fctx.fillText('R = '+Math.round(REl.value)+' Ω', cx, cy-150);
+
+      // capacitor
+      fctx.strokeStyle='#e5e7eb';
+      fctx.lineWidth=4;
+      fctx.beginPath();
+      fctx.moveTo(capX-8,capY-30);
+      fctx.lineTo(capX-8,capY+30);
+      fctx.moveTo(capX+8,capY-30);
+      fctx.lineTo(capX+8,capY+30);
+      fctx.stroke();
+      fctx.fillText('C = '+Number(CEl.value).toFixed(0)+' µF', capX, capY+64);
+      fctx.font='18px system-ui';
+      fctx.fillText(Vc.toFixed(2)+' V', capX, capY-50);
+
+      const I  = computeCurrent();
+      const Id = computeDisplacementCurrent();
+      const Itotal = I + Id;
+
+      // banda de campo fuerte
+      const bandHeight = 80;
+      const intensity = Math.min(1, Math.log10(1 + Math.abs(Itotal)*1e6) / 4);
+      const alphaBand = 0.15 + 0.4*intensity;
+      const gradBand = fctx.createLinearGradient(wx1, wy-bandHeight, wx2, wy+bandHeight);
+      gradBand.addColorStop(0, `rgba(15,23,42,0)`);
+      gradBand.addColorStop(0.5, `rgba(56,189,248,${alphaBand.toFixed(2)})`);
+      gradBand.addColorStop(1, `rgba(15,23,42,0)`);
+      fctx.fillStyle = gradBand;
+      fctx.fillRect(wx1, wy-bandHeight, (wx2-wx1), bandHeight*2);
+
+      // líneas de campo circulares (solo visual)
+      fctx.strokeStyle='rgba(56,189,248,0.5)';
+      fctx.lineWidth=1.4;
+      const cxw = (wx1 + wx2)/2;
+      for(let r=25; r<=130; r+=25){
+        fctx.beginPath();
+        fctx.arc(cxw, wy, r, 0, Math.PI*2);
+        fctx.stroke();
+      }
+
+      // flecha de corriente en el cable
+      fctx.fillStyle='#38bdf8';
+      fctx.beginPath();
+      if (Itotal >= 0){
+        fctx.moveTo(wx1+40, wy-8);
+        fctx.lineTo(wx1+70, wy);
+        fctx.lineTo(wx1+40, wy+8);
+      } else {
+        fctx.moveTo(wx2-40, wy-8);
+        fctx.lineTo(wx2-70, wy);
+        fctx.lineTo(wx2-40, wy+8);
+      }
+      fctx.closePath();
+      fctx.fill();
+
+      // posición de la brújula
+      const bx = compassPos.x * w;
+      const by = compassPos.y * h;
+
+      // distancia vertical al cable
+      const dyProbe = by - wy;
+      const r = Math.max(5, Math.abs(dyProbe));
+
+      // campo ~ I/r pero fuertemente exagerado (igual idea que en la versión simple)
+      const B = (Itotal / r) * 3e5;
+
+      let angle = B; // radianes ya escalados
+      const maxAngle = Math.PI*0.8;
+      if (angle >  maxAngle) angle =  maxAngle;
+      if (angle < -maxAngle) angle = -maxAngle;
+
+      drawCompassIntegrated(bx, by, angle);
+
+      // texto de corrientes
+      fctx.font='13px system-ui';
+      fctx.fillStyle='#e5e7eb';
+      fctx.textAlign='left';
+      fctx.fillText('I(t) = ' + I.toExponential(3) + ' A', wx2-190, wy-110);
+      fctx.fillText('I_disp ≈ ' + Id.toExponential(3) + ' A', wx2-190, wy-92);
+
+      // multímetro y modo
+      meter.textContent = Vc.toFixed(3) + ' V';
+      tval.textContent  = t.toFixed(3);
+      modeLabel.textContent = charging ? 'Carga' : 'Descarga';
+
+      drawPlot();
+    }
+
+    function drawPlot(){
+      const w = plotCanvas.width;
+      const h = plotCanvas.height;
+      pctx.clearRect(0,0,w,h);
+
+      pctx.strokeStyle='rgba(30,64,175,0.35)';
+      pctx.lineWidth=1;
+      for(let i=1;i<4;i++){
+        const y = (i/4)*h;
+        pctx.beginPath();
+        pctx.moveTo(0,y);
+        pctx.lineTo(w,y);
+        pctx.stroke();
+      }
+
+      if (history.t.length < 2) return;
+
+      const tMin = history.t[0];
+      const tMax = history.t[history.t.length-1] || 1;
+      const VMax = Math.max(Number(VbatEl.value), 1);
+      const IMax = Math.max(...history.I.map(x => Math.abs(x))) || 1e-9;
+
+      // V(t)
+      pctx.beginPath();
+      for(let i=0;i<history.t.length;i++){
+        const x = (history.t[i] - tMin)/(tMax - tMin) * w;
+        const vNorm = history.V[i] / VMax;
+        const y = h - vNorm * (h*0.8) - 6;
+        if(i===0) pctx.moveTo(x,y); else pctx.lineTo(x,y);
+      }
+      pctx.strokeStyle='rgba(56,189,248,0.95)';
+      pctx.lineWidth=2;
+      pctx.stroke();
+
+      // I(t)
+      pctx.beginPath();
+      for(let i=0;i<history.t.length;i++){
+        const x = (history.t[i] - tMin)/(tMax - tMin) * w;
+        const iNorm = history.I[i] / IMax / 2;
+        const y = h - (0.5 + iNorm) * (h*0.6) - 6;
+        if(i===0) pctx.moveTo(x,y); else pctx.lineTo(x,y);
+      }
+      pctx.strokeStyle='rgba(129,140,248,0.95)';
+      pctx.lineWidth=2;
+      pctx.stroke();
+
+      pctx.font='12px system-ui';
+      pctx.fillStyle='#e5e7eb';
+      pctx.fillText('V(t) (normalizada)', 8, 14);
+      pctx.fillStyle='rgba(129,140,248,0.95)';
+      pctx.fillText('I(t) (normalizada)', 150, 14);
+    }
+
+    function loop(){
+      stepSim();
+      drawAll();
+      requestAnimationFrame(loop);
+    }
+
+    reset();
+    loop();
+  </script>
+</body>
+</html>

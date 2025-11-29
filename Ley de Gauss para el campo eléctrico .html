@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>Simulador Ley de Gauss - Completo</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    :root{
+      --bg:#0f1724;
+      --panel:#0b1220;
+      --accent:#20c997;
+      --muted:#9aa6b2;
+      --card:#0b1220;
+      --tooltip-bg: rgba(0, 0, 0, 0.95);
+    }
+    body{
+      margin:0;
+      font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+      background:linear-gradient(180deg,#071022 0%, #081428 100%);
+      color:#e6eef6;
+    }
+    .container{
+      display:grid;
+      grid-template-columns:330px 1fr;
+      gap:10px;
+      padding:10px;
+      height:100vh;
+      box-sizing:border-box;
+    }
+    .panel{
+      background:var(--card);
+      border-radius:10px;
+      padding:12px;
+      box-shadow:0 6px 18px rgba(2,6,23,0.6);
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      overflow: visible;
+    }
+    h2{margin:0 0 4px;font-size:18px;}
+    label{font-size:13px;color:var(--muted);display:block;margin:4px 0;}
+    input[type=range]{width:100%;cursor: pointer;}
+    canvas{
+      width:100%;
+      height:100%;
+      border-radius:8px;
+      display:block;
+      cursor: crosshair;
+    }
+    .row{display:flex;gap:8px;align-items:center;}
+    .btn{
+      padding:6px 10px;
+      border-radius:8px;
+      background:transparent;
+      border:1px solid rgba(255,255,255,0.08);
+      color:#fff;
+      cursor:pointer;
+      font-size:13px;
+      transition: background 0.2s;
+    }
+    .btn:hover { background: rgba(255,255,255,0.05); }
+    .small{font-size:12px;color:var(--muted);}
+    .legend span{display:block;font-size:12px;color:var(--muted);}
+
+    /* Tooltips CSS */
+    [data-tooltip] { position: relative; cursor: help; }
+    [data-tooltip]::after {
+      content: attr(data-tooltip);
+      position: absolute;
+      bottom: 120%; left: 50%;
+      transform: translateX(-50%) translateY(10px);
+      background: var(--tooltip-bg); color: #fff;
+      padding: 8px 12px; border-radius: 6px; font-size: 12px;
+      white-space: normal; width: max-content; max-width: 220px;
+      text-align: center; opacity: 0; visibility: hidden;
+      transition: all 0.2s ease-in-out; pointer-events: none; z-index: 1000;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1);
+    }
+    [data-tooltip]::before {
+      content: ''; position: absolute; bottom: 110%; left: 50%;
+      transform: translateX(-50%) translateY(10px);
+      border-width: 6px; border-style: solid;
+      border-color: var(--tooltip-bg) transparent transparent transparent;
+      opacity: 0; visibility: hidden; transition: all 0.2s ease-in-out; z-index: 1000;
+    }
+    [data-tooltip]:hover::after, [data-tooltip]:hover::before {
+      opacity: 1; visibility: visible; transform: translateX(-50%) translateY(0);
+    }
+
+    /* --- NUEVO: Estilos para la caja de conclusiones --- */
+    .info-box {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.05);
+      border-radius: 8px;
+      padding: 10px;
+      margin-top: auto; /* Empuja esto al fondo si hay espacio */
+    }
+    .equation {
+      font-family: 'Times New Roman', serif;
+      font-style: italic;
+      font-size: 15px;
+      text-align: center;
+      margin-bottom: 8px;
+      color: #fff;
+      letter-spacing: 1px;
+    }
+    .conclusions {
+      margin: 0;
+      padding-left: 18px;
+      color: var(--muted);
+      font-size: 11.5px;
+      line-height: 1.4;
+    }
+    .conclusions li {
+      margin-bottom: 4px;
+    }
+    .conclusions strong {
+      color: var(--accent);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="panel">
+      <div>
+        <h2>Ley de Gauss (Electricidad)</h2>
+        <div class="small">
+          Visualiza el flujo eléctrico a través de una superficie cerrada.
+        </div>
+      </div>
+
+      <div>
+        <label><strong>Simulación</strong></label>
+        <div class="row">
+          <button id="play" class="btn" data-tooltip="Reanuda el movimiento de las partículas de campo.">Iniciar</button>
+          <button id="pause" class="btn" data-tooltip="Congela la animación para analizar el estado actual.">Pausar</button>
+          <button id="reset" class="btn" data-tooltip="Borra todas las cargas y reinicia la simulación.">Reset</button>
+        </div>
+      </div>
+
+      <div>
+        <label><strong>Opciones visuales</strong></label>
+        <div data-tooltip="Muestra flechas estáticas que indican la dirección y magnitud del campo eléctrico en cada punto.">
+          <label><input id="show-vectors" type="checkbox" checked> Mostrar vectores de campo</label>
+        </div>
+        <div data-tooltip="Muestra partículas fluyendo que permiten visualizar las líneas de campo continuas.">
+          <label><input id="show-stream" type="checkbox" checked> Mostrar líneas de campo</label>
+        </div>
+      </div>
+
+      <div>
+        <label data-tooltip="Controla qué tan rápido se mueven las partículas de las líneas de campo.">
+          <strong>Velocidad de animación</strong>
+          <input id="speed" type="range" min="0" max="2" step="0.01" value="1">
+        </label>
+      </div>
+
+      <div>
+        <label><strong>Parámetros</strong></label>
+        <div class="small">
+          Click izquierdo: crear/mover carga.  
+          SHIFT + click: borrar carga.
+        </div>
+        
+        <label data-tooltip="Define la magnitud y signo de la PRÓXIMA carga que crees al hacer click en el canvas.">
+          Carga a insertar (q): 
+          <input id="param1" type="range" min="-5" max="5" step="0.1" value="2">
+        </label>
+
+        <label data-tooltip="Cambia el tamaño del radio (R) para ver que el flujo NO cambia si la carga sigue dentro.">
+          Radio superficie gaussiana (R):
+          <input id="param2" type="range" min="40" max="200" step="2" value="90">
+        </label>
+      </div>
+
+      <div class="legend">
+        <span>🔴 carga positiva (fuente)</span>
+        <span>🔵 carga negativa (sumidero)</span>
+        <span>🔘 Superficie gaussiana</span>
+      </div>
+
+      <div class="info-box">
+        <div class="equation" data-tooltip="Forma integral de la Ley de Gauss">
+          ∮ E · dA = Q<sub>enc</sub> / ε₀
+        </div>
+        <ul class="conclusions">
+          <li>El flujo neto depende <strong>solo</strong> de la carga encerrada (Q<sub>enc</sub>).</li>
+          <li>El tamaño de la superficie <strong>no afecta</strong> al flujo total.</li>
+          <li>Las cargas <strong>externas</strong> no contribuyen al flujo neto.</li>
+        </ul>
+      </div>
+
+    </div>
+
+    <div class="panel">
+      <canvas id="simCanvas"></canvas>
+    </div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('simCanvas');
+    const ctx     = canvas.getContext('2d');
+    const DPR     = window.devicePixelRatio || 1;
+
+    function resize(){
+      canvas.width  = canvas.clientWidth * DPR;
+      canvas.height = canvas.clientHeight * DPR;
+      ctx.setTransform(DPR,0,0,DPR,0,0);
+    }
+    resize();
+    window.addEventListener('resize', resize);
+
+    // ---- Estado ----
+    const entities = []; 
+    const particles = [];
+    let isPlaying = true;
+    let mousePos = { x: 0, y: 0, onCanvas: false };
+
+    // Controles
+    const playBtn  = document.getElementById('play');
+    const pauseBtn = document.getElementById('pause');
+    const resetBtn = document.getElementById('reset');
+
+    playBtn.onclick  = ()=> isPlaying = true;
+    pauseBtn.onclick = ()=> isPlaying = false;
+    resetBtn.onclick = ()=>{
+      entities.length = 0;
+      particles.length = 0;
+      spawnParticles(120);
+    };
+
+    function spawnParticles(n=80){
+      for(let i=0;i<n;i++){
+        particles.push({
+          x:Math.random()*canvas.clientWidth,
+          y:Math.random()*canvas.clientHeight,
+          age:Math.random()*200
+        });
+      }
+    }
+    spawnParticles(120);
+
+    // Interacción
+    let dragging = null;
+
+    canvas.addEventListener('mousedown', e=>{
+      const x = mousePos.x;
+      const y = mousePos.y;
+
+      if(e.shiftKey){
+        let best=-1, bd=999;
+        entities.forEach((en,i)=>{
+          const d = Math.hypot(en.x-x,en.y-y);
+          if(d<bd){bd=d;best=i;}
+        });
+        if(best>=0 && bd<25) entities.splice(best,1);
+        return;
+      }
+
+      let grabbed = null;
+      entities.forEach(en=>{
+        const d = Math.hypot(en.x-x,en.y-y);
+        if(d<12) grabbed = en;
+      });
+      if(grabbed){
+        dragging = grabbed;
+      }else{
+        const q = parseFloat(document.getElementById('param1').value) || 1;
+        const en = {type:'charge',x,y,q};
+        entities.push(en);
+        dragging = en;
+      }
+    });
+
+    canvas.addEventListener('mouseenter', () => mousePos.onCanvas = true);
+    canvas.addEventListener('mouseleave', () => {
+        mousePos.onCanvas = false;
+        dragging = null;
+    });
+
+    canvas.addEventListener('mousemove', e=>{
+      const rect = canvas.getBoundingClientRect();
+      mousePos.x = e.clientX - rect.left;
+      mousePos.y = e.clientY - rect.top;
+
+      if(dragging){
+        dragging.x = mousePos.x;
+        dragging.y = mousePos.y;
+      }
+    });
+
+    window.addEventListener('mouseup', ()=> dragging=null);
+
+    // ---- Campo eléctrico ----
+    function E_field_at(x,y){
+      let Ex=0, Ey=0;
+      entities.forEach(en=>{
+        if(en.type!=='charge') return;
+        const dx = x-en.x;
+        const dy = y-en.y;
+        const r2 = dx*dx + dy*dy + 25;
+        const r  = Math.sqrt(r2);
+        const k  = 8000;   
+        const strength = k*en.q/r2;
+        Ex += strength*dx/r;
+        Ey += strength*dy/r;
+      });
+      return {x:Ex,y:Ey};
+    }
+
+    function drawArrow(x,y,dx,dy,scale=1,color='rgba(120,200,255,0.9)'){
+      const len = Math.hypot(dx,dy);
+      if(len<1e-3) return;
+      const ux = dx/len, uy = dy/len;
+      ctx.save();
+      ctx.translate(x,y);
+      ctx.rotate(Math.atan2(uy,ux));
+      ctx.beginPath();
+      ctx.moveTo(0,0);
+      ctx.lineTo(len*scale,0);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = Math.min(2,1+len*0.02);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(len*scale,0);
+      ctx.lineTo(len*scale-6,-4);
+      ctx.lineTo(len*scale-6,4);
+      ctx.closePath();
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.restore();
+    }
+
+    function draw(){
+      const W = canvas.clientWidth;
+      const H = canvas.clientHeight;
+
+      ctx.clearRect(0,0,W,H);
+      ctx.fillStyle = '#050814';
+      ctx.fillRect(0,0,W,H);
+
+      // Grid
+      ctx.globalAlpha = 0.07;
+      ctx.beginPath();
+      for(let x=0; x<W; x+=40){ ctx.moveTo(x,0); ctx.lineTo(x,H); }
+      for(let y=0; y<H; y+=40){ ctx.moveTo(0,y); ctx.lineTo(W,y); }
+      ctx.strokeStyle = '#1f2937';
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+
+      const speed = parseFloat(document.getElementById('speed').value) || 1;
+
+      // Cargas
+      entities.forEach(en=>{
+        ctx.beginPath();
+        ctx.arc(en.x,en.y,8,0,Math.PI*2);
+        ctx.fillStyle = en.q>0? 'rgba(255,90,90,0.95)':'rgba(120,170,255,0.95)';
+        ctx.fill();
+        ctx.fillStyle='#fff';
+        ctx.font='11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText((en.q>0?'+':'')+en.q.toFixed(1), en.x, en.y-12);
+      });
+      ctx.textAlign = 'left';
+
+      const showVectors = document.getElementById('show-vectors').checked;
+      const showStream  = document.getElementById('show-stream').checked;
+
+      if(showVectors){
+        const step = 40;
+        for(let gx=20; gx<W; gx+=step){
+          for(let gy=20; gy<H; gy+=step){
+            const e = E_field_at(gx,gy);
+            const ex = e.x*0.04, ey=e.y*0.04;
+            drawArrow(gx,gy,ex,ey,1,'rgba(120,200,255,0.9)');
+          }
+        }
+      }
+
+      if(showStream && isPlaying){
+        particles.forEach(p=>{
+          const vel = E_field_at(p.x,p.y);
+          p.x += vel.x*0.06 * speed;
+          p.y += vel.y*0.06 * speed;
+          p.age += speed;
+
+          if(p.x<0||p.x>W||p.y<0||p.y>H||p.age>500){
+            p.x = Math.random()*W;
+            p.y = Math.random()*H;
+            p.age = 0;
+          }
+
+          ctx.beginPath();
+          ctx.moveTo(p.x,p.y);
+          ctx.lineTo(p.x-vel.x*0.5, p.y-vel.y*0.5);
+          ctx.strokeStyle='rgba(255,255,255,0.55)';
+          ctx.lineWidth=1;
+          ctx.stroke();
+        });
+      } else if (showStream && !isPlaying) {
+         particles.forEach(p=>{
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 1, 0, Math.PI*2);
+            ctx.fillStyle='rgba(255,255,255,0.5)';
+            ctx.fill();
+         });
+      }
+
+      // Superficie Gaussiana
+      if(entities.length>0){
+        const Rslider = parseFloat(document.getElementById('param2').value) || 90;
+        const centerCharge = entities[0];
+        const cx = centerCharge.x;
+        const cy = centerCharge.y;
+        const R  = Rslider;
+
+        ctx.beginPath();
+        ctx.arc(cx,cy,R,0,Math.PI*2);
+        ctx.strokeStyle='rgba(255,255,255,0.3)';
+        ctx.lineWidth = 1.7;
+        ctx.setLineDash([5, 5]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        let Qenc = 0;
+        entities.forEach(en=>{
+          const d = Math.hypot(en.x-cx,en.y-cy);
+          if(d<=R) Qenc += en.q;
+        });
+
+        ctx.fillStyle='#fff';
+        ctx.font='12px sans-serif';
+        ctx.fillText('Superficie S', cx-R-4, cy-R-8);
+        ctx.fillText('Q_enc = '+Qenc.toFixed(2), cx+R+10, cy-4);
+        ctx.fillText('Φ_E ∝ '+Qenc.toFixed(2), cx+R+10, cy+12);
+
+        // Flechas flujo
+        const Nflux = 16;
+        for(let i=0;i<Nflux;i++){
+          const angle = 2*Math.PI*i/Nflux;
+          const sx = cx + R*Math.cos(angle);
+          const sy = cy + R*Math.sin(angle);
+          const e  = E_field_at(sx,sy);
+          const nx = Math.cos(angle);
+          const ny = Math.sin(angle);
+          const En = e.x*nx + e.y*ny;
+          const L  = 22*Math.sign(En || 1);
+          drawArrow(
+            sx,sy,
+            nx*L,ny*L,
+            1,
+            En>=0 ? 'rgba(120,255,160,0.9)' : 'rgba(255,120,120,0.9)'
+          );
+        }
+      }
+
+      // Preview de Carga
+      if(mousePos.onCanvas && !dragging){
+         const nextQ = parseFloat(document.getElementById('param1').value) || 1;
+         const mx = mousePos.x;
+         const my = mousePos.y;
+
+         ctx.save();
+         ctx.translate(mx + 15, my + 15);
+         
+         ctx.fillStyle = 'rgba(0,0,0,0.8)';
+         ctx.beginPath();
+         ctx.roundRect(0, 0, 75, 26, 4);
+         ctx.fill();
+         ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+         ctx.lineWidth = 1;
+         ctx.stroke();
+
+         ctx.beginPath();
+         ctx.arc(13, 13, 6, 0, Math.PI*2);
+         ctx.fillStyle = nextQ > 0 ? 'rgba(255,90,90,0.9)' : 'rgba(120,170,255,0.9)';
+         ctx.fill();
+
+         ctx.fillStyle = '#fff';
+         ctx.font = 'bold 12px monospace';
+         ctx.textAlign = 'left';
+         ctx.textBaseline = 'middle';
+         const sign = nextQ > 0 ? '+' : '';
+         ctx.fillText(sign + nextQ.toFixed(1) + 'q', 24, 13);
+         
+         ctx.restore();
+      }
+
+      // HUD Title
+      ctx.fillStyle='rgba(255,255,255,0.04)';
+      ctx.fillRect(10,10,320,42);
+      ctx.fillStyle='#fff';
+      ctx.font='12px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'alphabetic';
+      ctx.fillText('Ley de Gauss (Electricidad)', 18,28);
+      ctx.fillStyle='rgba(255,255,255,0.7)';
+      ctx.font='11px sans-serif';
+      ctx.fillText('Cargas: '+entities.length+'  •  Partículas: '+particles.length, 18,42);
+    }
+
+    function loop(){
+      draw();
+      requestAnimationFrame(loop);
+    }
+    loop();
+  </script>
+</body>
+</html>
